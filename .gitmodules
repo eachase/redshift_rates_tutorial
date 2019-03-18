@@ -1,0 +1,3 @@
+[submodule "gw_event_gen"]
+	path = gw_event_gen
+	url = git@git.ligo.org:chris-pankow/gw_event_gen.git
