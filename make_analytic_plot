@@ -1,0 +1,280 @@
+#!/usr/bin/env python
+
+
+from __future__ import division
+
+import matplotlib
+matplotlib.rcParams['figure.figsize'] = (12.0, 9.0)
+matplotlib.rcParams['xtick.labelsize'] = 24.0
+matplotlib.rcParams['ytick.labelsize'] = 24.0
+matplotlib.rcParams['axes.titlesize'] = 27.0
+matplotlib.rcParams['axes.labelsize'] = 27.0
+matplotlib.rcParams['legend.fontsize'] = 24.0
+matplotlib.rcParams['text.usetex'] = True
+matplotlib.rcParams['text.latex.preamble'] = r"\usepackage{amsmath}"
+matplotlib.rcParams['font.serif'] = ['Computer Modern', 'Times New Roman']
+matplotlib.rcParams['font.family'] = ['serif', 'STIXGeneral']
+matplotlib.rcParams['legend.frameon'] = False
+
+import argparse
+import matplotlib.pyplot as plt
+import numpy as np
+from scipy.integrate import quad
+from scipy.special import erf, erfc, erfinv
+
+
+import sys
+sys.path.append("./gw_event_gen/")
+import redshift_rates_tool as rt
+import fg_models
+from netsim import Network
+
+# Default network
+aligo = Network()
+aligo.add_psd("H1")
+ifo = 'H1'
+
+# Compute integrated background normalized density
+def bg_cumulative_density(snr, snr_min):
+    return erfc(snr / np.sqrt(2)) / erfc(snr_min / np.sqrt(2))   
+
+def bg_noncumulative_density(snr, snr_min):
+    return (np.sqrt(np.pi/2) * erfc(
+        snr_min / np.sqrt(2)))**(-1) * np.exp(-snr**2 / 2)
+
+# Compute integrated foreground normalized density
+def fg_cumulative_optimal(snr, snr_min, snr_max):
+    return snr**(-3) / (snr_min**(-3) - snr_max**(-3))
+
+# Compute f(rho) including orientation effects
+def fg_noncumulative_with_orientation(snr_range, snr_thresh,
+    z_low, z_high, mass1=20, mass2=20, universe='lambdacdm'):
+    
+    # Set redshift parameters for bin
+    if universe=='lambdacdm':
+        z_horiz = aligo.redshift_horizon(mass1=mass1, mass2=mass2,
+            snr_threshold=snr_thresh, mass_distr='fixed_source')["H1"]
+    elif universe == 'euclidean':
+        z_horiz = aligo.horizon(mass1=mass1, mass2=mass2,
+                snr_threshold=snr_thresh)["H1"]
+
+    # Compute likelihood
+    likelihood = np.zeros_like(snr_range, dtype=float)
+    for i, snr in enumerate(snr_range):
+        likelihood[i] = fg_density_with_orientation(snr, snr_thresh,
+            z_low, z_high, z_horiz, mass1=mass1, mass2=mass2, 
+            universe=universe)
+
+    # Normalize likelihood
+    norm = fg_models.get_norm_snr_bins(z_low, z_high,
+        z_horiz, snr_thresh, ifo=ifo, mass1=mass1,
+        mass2=mass2, universe=universe, power=4,
+        mass_distr='fixed_source')
+
+    return likelihood / norm
+
+def fg_density_with_orientation(snr, snr_thresh,
+    z_low, z_high, z_horiz, mass1, mass2, universe):
+    return fg_models.snr_distr_z(snr, z_low, z_high,
+        z_horiz, snr_thresh, ifo=ifo, mass1=mass1,
+        mass2=mass2, universe=universe, power=4,
+        mass_distr='fixed_source')
+
+
+
+def fg_cumulative_with_orientation(snr_range, snr_thresh,
+    z_low, z_high, mass1=10, mass2=10):
+    
+    # Set horizon redshift
+    z_horiz = aligo.redshift_horizon(mass1=mass1, mass2=mass2,
+        snr_threshold=snr_thresh, mass_distr='fixed_source')["H1"]
+
+    # Compute integral for each SNR
+    integral = np.zeros_like(snr_range, dtype=float)
+    for i, snr in enumerate(snr_range):
+        integral[i] = quad(fg_density_with_orientation, snr, np.inf,
+            args=(snr_thresh, z_low, z_high, z_horiz, mass1, mass2))
+
+
+    # Normalize probability density
+
+
+
+def plot_analytic(loglog=True, optimal=True, cumulative=False, 
+    num_bins=5, bin_edges=None, universe='lambdacdm'):
+
+    # Set desired SNR ranges
+    snr_thresh = 3.5
+    snr_range_small = np.linspace(snr_thresh, 10, 20)
+
+    # Manually set event counts
+    bg_counts = 10000
+    fg_counts = [1000, 500, 100]
+
+    # Set plot parameters
+    #colors = ['#253494', '#41b6c4', '#a1dab4']
+    colors = ['#0072b2','#56B4E9','#009e73','#d55e00','#CC79A7','#e69f00','#f0e442','k']
+    linewidths = np.arange(3, 9)[::-1]  #[7.5, 6, 4.5, 3]
+
+    # Prepare figure
+    plt.figure()
+
+    # Plot background density
+    if cumulative:
+        plt.plot(snr_range_small, bg_counts * bg_cumulative_density(
+            snr_range_small, snr_thresh), label='Background', color='k', lw=linewidths[0])
+    else:
+        plt.plot(snr_range_small, bg_noncumulative_density(
+            snr_range_small, snr_thresh), label='Background', color='k', lw=linewidths[0])
+
+
+
+    if optimal:
+        # FIXME add cumulative vs. noncumulative conditions
+
+        # Define redshift boundaries
+        if bin_edges is None:
+            bin_edges = np.array([0, 0.25, 0.75, 1.5])
+        else:
+            bin_edges = [float(i) for i in bin_edges[1:-1].split(',')]
+
+        # Plot each redshift bin
+        for i, z_low in enumerate(bin_edges[:-1]):
+            z_high = bin_edges[i+1]
+            fg_count = fg_counts[i]
+            
+            # Find corresponding SNRs to bin edges
+            snr_max = max(snr_thresh, rt.compute_max_snr(z_low, snr_thresh, universe=universe))
+            snr_min = max(snr_thresh, rt.compute_max_snr(z_high, snr_thresh, universe=universe))
+            
+            label = 'z: %.1f - %.1f' % (z_low, z_high)
+            
+            snr_range = np.linspace(snr_min, min(100, snr_max), 100)
+            plt.plot(snr_range, fg_count * fg_cumulative_bin_density(
+                snr_range, snr_min, snr_max) / fg_cumulative_bin_density(
+                snr_min, snr_min, snr_max), label=label, color=colors[i], lw=linewidths[i+1])
+            
+            # Plot horizontal line for inner  bins
+            if snr_min != snr_thresh:
+                plt.plot([snr_thresh, snr_min], [fg_count, fg_count],
+                        color=colors[i], lw=linewidths[i+1])
+                
+            # Plot vertical line for all but outer bins
+            if snr_max != np.inf:
+                plt.plot([snr_max, snr_max], [1e-5, fg_count * fg_cumulative_bin_density(
+                    snr_max, snr_min, snr_max) / fg_cumulative_bin_density(
+                    snr_min, snr_min, snr_max)], color=colors[i], lw=linewidths[i+1])
+
+        #plt.title('Optimally-oriented binaries')
+
+    # Various Orientations
+    else:
+        # Define redshift boundaries
+        if bin_edges is None:
+            bin_edges = np.linspace(0, 1, num_bins+1)
+        else:
+            print bin_edges
+            bin_edges = [float(i) for i in bin_edges[1:-1].split(',')]
+
+        #bin_edges = np.array([0, 0.25, 0.5, 0.75])
+
+        # Plot for each redshift bin
+        for i, z_low in enumerate(bin_edges[:-1]):
+ 
+            print 'Computing Bin %i' % i
+            z_high = bin_edges[i+1]
+            #fg_count = fg_counts[i]
+            if universe == 'lambdacdm':
+                label = r'$z$: %.2f--%.2f' % (z_low, z_high)
+            elif universe == 'euclidean':
+                label = r'Dist: %.0f--%.0f Mpc' % (z_low, z_high)
+     
+            # Find the maximum possible SNR in the bin
+            snr_max = max(snr_thresh, rt.compute_max_snr(
+                z_low, snr_thresh, universe=universe))
+
+            # Set appropriate SNR range for plotting
+            snr_range = np.linspace(snr_thresh, min(50, snr_max), 50)
+
+
+            if cumulative:
+                # Compute cumulative f(rho) for bin
+                pass
+            else:
+                # Compute f(rho) for bin
+                prob_snr = fg_noncumulative_with_orientation(snr_range, snr_thresh, 
+                    z_low, z_high, universe=universe)
+
+                # Plot it
+                plt.plot(snr_range, prob_snr, label=label, 
+                    color=colors[i], lw=linewidths[i+1])
+
+
+
+            # Integrate f(rho) from the right
+
+        #plt.title('Fixed-mass binaries with various orientations')
+
+    plt.xlabel(r'Signal-to-noise ratio $\rho$')
+
+    
+
+    #plt.ylabel(r'dN/d$\rho$')
+    if cumulative:
+        plt.ylabel(r'Cumulative number of events $\geq \rho$')
+        plt.ylim(1e1, 1e4)
+    else:
+        plt.ylabel(r'Frequency density function')
+        plt.ylim(1e-2, 1e1)
+
+    plt.legend()
+
+    if loglog:
+        plt.xscale('log')
+        plt.xlim(snr_thresh, 100)
+    elif optimal:
+        plt.xlim(snr_thresh, 50)
+    else:
+        plt.xlim(snr_thresh, 20)
+    plt.yscale('log')
+
+
+if __name__ == '__main__':
+
+    # Inport many arguments
+    argp = argparse.ArgumentParser()
+
+    # Toggle between log-log plots and log-linear plots
+    argp.add_argument('-L', '--loglog', action='store_true', help='Make log-log plot.')
+
+    # Only plot optimally-aligned binaries
+    argp.add_argument('--optimal', action='store_true', help='Plot only optimally oriented binaries.')
+
+    # Plot the cumulative curves
+    argp.add_argument('--cumulative', action='store_true', help='Make cumulative curves (integrate above a\
+        certain SNR value).')
+ 
+    # Define the universe
+    argp.add_argument('--universe', default='euclidean', help='Set the universe type to either euclidean \
+        or lambdacdm.')
+
+    # Manually set bin edges
+    argp.add_argument('--bin-edges', default=None, help='Set in the format\
+         [z1,z2,z3,z4,etc.] without spaces. Assumed to be redshift values.\
+         Flag not valid for euclidean universes.')
+
+    # Output filename
+    argp.add_argument('-o', '--figname', default='temp.pdf', help='Name of output figure')
+
+
+    # Number of redshift bins
+    argp.add_argument('-n', '--num-bins', default=5, type=int, help='Number of redshift bins')
+
+    args = argp.parse_args()
+
+    plot_analytic(args.loglog, args.optimal, args.cumulative, args.num_bins, 
+        args.bin_edges, args.universe)
+   
+    # Save figure
+    plt.savefig(args.figname)
+

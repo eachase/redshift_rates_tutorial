@@ -1,0 +1,125 @@
+#!/usr/bin/env python
+
+##########
+# This code was edited from the O2 Rates and Populations paper: 
+# https://git.ligo.org/RatesAndPopulations/O2RandPPaper/blob/master/make_figs/__init__.py
+##########
+
+from __future__ import division
+
+import matplotlib
+matplotlib.rcParams['figure.figsize'] = (14.0, 14.0)
+matplotlib.rcParams['xtick.labelsize'] = 12.0
+matplotlib.rcParams['ytick.labelsize'] = 12.0
+matplotlib.rcParams['axes.titlesize'] = 25.0
+matplotlib.rcParams['axes.labelsize'] = 25.0
+matplotlib.rcParams['legend.fontsize'] = 22.0
+matplotlib.rcParams['lines.linewidth'] = 4.0
+
+import argparse
+import corner
+import matplotlib.pyplot as plt
+import numpy as np
+import seaborn as sns
+
+
+def plot_corner(
+        filename, num_bins, labels=None, color=None, linestyle=None,
+        range=None,
+        plot_2D=True,
+        fig=None, truths=None, use_counts=False,
+):
+    color = '#{:02x}{:02x}{:02x}'.format(*[int(v*255) for v in color])
+
+    kwargs = dict(
+        plot_density = True,
+        plot_datapoints = False,
+        plot_contours = True,
+        fill_contours = True,
+    )
+    if not plot_2D:
+        kwargs['plot_density'] = False
+        kwargs['density'] = False
+        kwargs['plot_contours'] = False
+        kwargs['fill_contours'] = False
+        kwargs['no_fill_contours'] = True
+        kwargs['contours'] = False
+
+    # Define data
+    all_data = np.genfromtxt(filename, delimiter=',', skip_header=1,
+        usecols=tuple(np.arange(1, 2+2*num_bins)))
+
+    # Make corner plot of the background data and the rate data for all foreground bins
+    if use_counts:
+        data = np.insert(all_data[:,1:(-num_bins)], 0, all_data[:,0], axis=1)
+    else:
+        data = np.insert(all_data[:,(-num_bins):], 0, all_data[:,0], axis=1)
+
+    fig = corner.corner(
+        data,
+        labels=labels,
+        color=color,
+        range=range,
+        smooth=0.9,
+        levels=(1 - np.exp(-0.5), 1 - np.exp(-2), 1 - np.exp(-9 / 2.)),
+        hist_kwargs={
+            'linewidth': matplotlib.rcParams['lines.linewidth'],
+            'linestyle': linestyle,
+            'density': True,
+        },
+        contour_kwargs={
+            "linestyles": linestyle,
+        },
+        quantiles=None,
+        max_n_ticks=5,
+        bins=50,
+        fig=fig,
+        truths=truths,
+        **kwargs
+    )
+
+    ndim = min(data.shape)
+    axes = np.array(fig.axes).reshape((ndim, ndim))
+
+    return fig, axes
+
+
+
+
+if __name__ == '__main__':
+
+    # Inport many arguments
+    argp = argparse.ArgumentParser()
+
+    # Input posterior samples
+    argp.add_argument('-i', '--posteriors', default=None, help='Path to csv file containing posterior samples')
+
+    # Number of redshift bins
+    argp.add_argument('-n', '--num-bins', default=5, type=int, help='Number of redshift bins')
+
+    # Make corner plot of counts (Lambda) instead of rates
+    argp.add_argument('-L', '--use-counts', action='store_true', help='Make a corner plot of Lambda instead of rate.')
+
+    # True counts in each bin
+    argp.add_argument('--counts', default=None, help='Set in the format\
+         [bg,bin1,bin2,bin3,etc.] without spaces.')
+
+
+
+    # Output PP plot filename
+    argp.add_argument('-o', '--figname', default='temp.pdf', help='Name of output figure')
+
+    # FIXME add toggle to turn off the combined samples P-P plot
+
+    args = argp.parse_args()
+
+    color = sns.color_palette('colorblind', n_colors=10)[5]
+    labels = ['Background', 'Bin 1', 'Bin 2', 'Bin 3', 'Bin 4', 'Bin 5']
+
+    true_values = np.array([float(i) for i in args.counts[1:-1].split(',')])
+
+    plot_corner(args.posteriors, args.num_bins, color=color, labels=labels, truths=true_values, use_counts=args.use_counts) 
+  
+    # Save figure
+    plt.savefig(args.figname)
+

@@ -1,0 +1,202 @@
+#!/usr/bin/env python
+
+
+from __future__ import division
+
+import matplotlib
+matplotlib.rcParams['figure.figsize'] = (12.0, 9.0)
+matplotlib.rcParams['xtick.labelsize'] = 24.0
+matplotlib.rcParams['ytick.labelsize'] = 24.0
+matplotlib.rcParams['axes.titlesize'] = 27.0
+matplotlib.rcParams['axes.labelsize'] = 27.0
+matplotlib.rcParams['legend.fontsize'] = 24.0
+matplotlib.rcParams['text.usetex'] = True
+matplotlib.rcParams['text.latex.preamble'] = r"\usepackage{amsmath}"
+matplotlib.rcParams['font.serif'] = ['Computer Modern', 'Times New Roman']
+matplotlib.rcParams['font.family'] = ['serif', 'STIXGeneral']
+matplotlib.rcParams['legend.frameon'] = False
+from matplotlib.ticker import FormatStrFormatter
+
+
+import argparse
+import matplotlib.pyplot as plt
+import numpy as np
+
+def adjacent_values(vals, q1, q3):
+    upper_adjacent_value = q3 + (q3 - q1) * 1.5
+    upper_adjacent_value = np.clip(upper_adjacent_value, q3, vals[-1])
+
+    lower_adjacent_value = q1 - (q3 - q1) * 1.5
+    lower_adjacent_value = np.clip(lower_adjacent_value, vals[0], q1)
+    return lower_adjacent_value, upper_adjacent_value
+
+
+def plot_violin(filename, num_bins=5, injected=None, plot_step=False, 
+    bin_edges=None, default=False, skip_last_bin=False, plot_rate=False, 
+    universe='lambdacdm'):
+
+    colors = ['#0072b2','#56B4E9','#009e73','#d55e00','#CC79A7','#e69f00','#f0e442']
+
+
+    usecols=tuple(np.arange(1, 2+2*num_bins))
+
+    bin_data = np.genfromtxt(filename, delimiter=',', skip_header=1,
+        usecols=usecols)
+    if bin_edges is None:
+        z_max = 1
+        bin_edges = np.linspace(0, z_max, num_bins+1)
+    else:
+        bin_edges = np.array([float(i) for i in bin_edges[1:-1].split(',')])
+        z_min = bin_edges[0]
+        z_max = bin_edges[-1]
+
+    # FIXME: make less dumb
+    fig, ax = plt.subplots(nrows=1, ncols=1) #, figsize=(12, 12))
+
+    rates_data = bin_data[:,-(num_bins):]
+    bin_middles = (bin_edges[1:] + bin_edges[:-1]) / 2
+
+    # Make a step plot of the medians
+    if plot_step:
+        # Find the median of each set of posteriors
+        medians = np.median(rates_data, axis=0)
+
+        # Extend the beginning and end of the bin_middles for plotting
+        updated_bins = np.insert(bin_middles, 0, 0)
+        updated_bins = np.append(updated_bins, z_max)
+        updated_medians = np.insert(medians, 0, medians[0])
+        updated_medians = np.append(updated_medians, medians[-1])
+
+        plt.step(updated_bins, updated_medians, where='mid', lw=1, color='purple', label='Recovered Median')
+
+    proportion = 5 * (z_max - z_min) /  num_bins
+    violin_width = 0.17 * proportion
+    box_width = 0.02 * proportion 
+
+    # Plot violin
+    if default:
+        ax.violinplot(rates_data, positions=bin_middles, points=50, widths=0.1,
+                              showextrema=False)
+
+    # Used this example: https://matplotlib.org/gallery/statistics/customized_violin.html
+    else:
+        parts = ax.violinplot(rates_data, positions=bin_middles, points=200, 
+            widths=violin_width, showextrema=False, showmeans=False, showmedians=False)
+
+        for i, pc in enumerate(parts['bodies']):
+            pc.set_facecolor(colors[i % len(colors)])
+            pc.set_edgecolor(None)
+            pc.set_alpha(1)
+
+        ax.boxplot(rates_data, whis=[5,95], positions=bin_middles,
+            showcaps=False, showfliers=False, widths=box_width, patch_artist=True,
+            boxprops=dict(color="k", facecolor="k", alpha=0.7),
+            whiskerprops=dict(color="k", linewidth=2),
+            medianprops=dict(color="w", linewidth=2))
+
+        if universe == 'lambdacdm':
+            ax.xaxis.set_major_formatter(FormatStrFormatter('%.2f'))
+        else:
+            ax.xaxis.set_major_formatter(FormatStrFormatter('%.0f'))
+
+
+        #lower5, medians, upper95 = np.percentile(rates_data, [5, 50, 95], axis=0)
+        #whiskers = np.array([
+        #    adjacent_values(sorted_array, q1, q3)
+        #    for sorted_array, q1, q3 in zip(rates_data, lower5, upper95)])
+        #whiskersMin, whiskersMax = whiskers[:, 0], whiskers[:, 1]
+
+        #inds = np.arange(1, len(medians) + 1)
+        #ax.scatter(bin_middles, medians, marker='o', color='w', s=40, zorder=3, label='Median')
+        #ax.vlines(bin_middles, lower5, upper95, color='k', linestyle='-', lw=3, label='90% Credible Intv.')
+        #ax.vlines(bin_middles, whiskersMin, whiskersMax, color='k', linestyle='-', lw=1)
+
+    if plot_rate:
+        # Plot hardcoded rate -  assumes distances are in Gpc
+        rate = lambda dist : 2 * injected * (dist / 2)**2
+
+        ax.plot(bin_edges, rate(bin_edges/1000), color='k', ls='-', lw=4, label='Injected', zorder=4, alpha=0.7)
+
+    elif injected != None:
+        ax.axhline(y=injected, color='k', ls='-', lw=4, label='Injected', zorder=4, alpha=0.7)
+
+
+
+
+    ax.set_xlim(z_min, z_max)
+    ax.set_ylabel(r'Rate $R_i/ \mathrm{Gpc}^{-3} \, \mathrm{yr}^{-1}$')
+    #ax.set_yscale('log')
+    plt.legend(loc='upper right')
+
+
+if __name__ == '__main__':
+
+    # Inport many arguments
+    argp = argparse.ArgumentParser()
+
+    # Input posterior samples
+    argp.add_argument('-i', '--posteriors', default=None, help='Path to csv file containing posterior samples')
+
+    # Number of redshift bins
+    argp.add_argument('-n', '--num-bins', default=5, type=int, help='Number of redshift bins')
+
+    # Plot a step plot along with the violin
+    argp.add_argument('-H', '--plot-step', action='store_true', help='Plot a step plot to show median of the posterior at each bin.')
+
+    # Do not plan further redshift bin
+    argp.add_argument('--skip-last-bin', action='store_true', help='Exclude furthest redshift bin from plot.')
+
+    # Define the universe
+    argp.add_argument('--universe', default='lambdacdm', help='Set the universe type to either euclidean \
+        or lambdacdm.')
+
+
+    # Manually set bin edges
+    argp.add_argument('--bin-edges', default=None, help='Set in the format\
+         [z1,z2,z3,z4,etc.] without spaces. Assumed to be redshift values. Flag not valid for euclidean universes.')
+
+
+    # Injected rate value
+    argp.add_argument('-I', '--injected', default=None, type=float,
+        help='Injected rate in units of Gpc^-3 * yr^-1 (optional).')
+
+    # Min of Y range
+    argp.add_argument('--ymin', default=None, type=float,
+        help='Minimum of y axis.')
+
+
+    # Max of Y range
+    argp.add_argument('--ymax', default=None, type=float,
+        help='Maximum of y axis.')
+
+    # FIXME! plot hardcoded rate distribution
+    argp.add_argument('--plot-rate', action='store_true', help='Plot a hardcoded rate distribution in lieu of injected rate.')
+
+   
+
+
+    # Output filename
+    argp.add_argument('-o', '--figname', default='temp.pdf', help='Name of output figure')
+
+
+    args = argp.parse_args()
+
+    plot_violin(args.posteriors, args.num_bins, args.injected, args.plot_step, 
+        args.bin_edges, skip_last_bin=args.skip_last_bin, plot_rate=args.plot_rate,
+        universe=args.universe)
+    if args.ymax is None:
+        plt.ylim(args.ymin, 2*args.injected)
+    else:
+        plt.ylim(args.ymin, args.ymax)   
+
+
+    if args.universe == 'lambdacdm':
+        plt.xlabel(r'Redshift $z$')
+    elif args.universe == 'euclidean':
+        plt.xlabel(r'Distance $Mpc$')
+    else:
+        raise ValueError('Invalid universe type.')
+
+    # Save figure
+    plt.savefig(args.figname)
+
