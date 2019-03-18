@@ -216,7 +216,7 @@ elif args.universe == 'lambdacdm':
 else:
     raise ValueError('Invalid universe type.')
 
-print bin_edges
+print 'Bin edges:', bin_edges
 
 # Set up sample collector object
 collector = rt.SampleCollector(snr_thresh, bin_edges, 
@@ -258,7 +258,6 @@ else:
     raise ValueError('Must set either bg_counts or bg_lambda.')
 
 # Generate background samples
-print 'Generating background samples (this can take a while)'
 collector.assign_background_samples(bg_counts=bg_counts)
 
 
@@ -319,7 +318,6 @@ else:
     collector.assign_foreground_samples(fg_samples=np.loadtxt(args.fg_samples))
     true_values = []
 
-print 'True Values: %s' % true_values 
 
 
 # Compute likelihood statistics
@@ -349,7 +347,6 @@ post_samples = sampler.chain[:, nburn:, :].reshape((-1, ndim))
 
 
 
-print 'MCMC Complete'
 
 # Make labels of only bins
 labels = ["Background"]
@@ -371,42 +368,5 @@ for i in range(len(collector.redshift_bins)):
 # Store samples to data frame
 df = pd.DataFrame(data=post_samples, columns=labels)
 df.to_csv(args.filename, index_label=False)
-
-# Expected rate
-try:
-    print 'Total FG:', total_fg
-    print 'Total VT:', total_VT
-    print 'Total R:', total_fg/total_VT
-except NameError:
-    pass
-
-# Compute CDF of each posterior distribution
-if num_bins == 1:
-    try:
-        # Background
-        true_bg_lambda = float(args.bg_lambda)
-        cdf_bg = rt.compute_cdf(df['Background'].values)
-        bg_percentile = cdf_bg(true_bg_lambda)
-        
-        print 'The true background Lambda, %.2f, is recovered at the %.3f per cent level.' % (true_bg_lambda, 100*bg_percentile)
-
-        # Foreground
-        cdf_fg = rt.compute_cdf(df['Bin 1'].values)
-        fg_percentile = cdf_bg(true_fg_lambda)
-        
-        print 'The true foreground Lambda, %.2f, is recovered at the %.3f per cent level.' % (true_fg_lambda, 100*fg_percentile)
-
-
-        
-
-    except ValueError:
-        print 'This set of parameters is not configured for a standard test.'
-
-
-
-# FIXME generalize for multiple bins
-
-
-
 
 

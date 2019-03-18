@@ -283,7 +283,6 @@ def get_norm_snr_bins(z_low, z_high, z_horiz, snr_min, mass1, mass2, snr_max=np.
     cdf = np.cumsum(pdist[:-1] * np.diff(snrbins))
     #norm_factor.append(cdf[-1])
 
-    print 'Normalization factor:', cdf[-1]
 
     return cdf[-1]
 
